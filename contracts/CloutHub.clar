@@ -1,3 +1,108 @@
+;; CloutHub - Reputation-based Social Platform
+;; A comprehensive smart contract for managing user reputation, achievements, and marketplace services
+
+;; =============================================================================
+;; CONSTANTS
+;; =============================================================================
+
+(define-constant ERR_NOT_AUTHORIZED u201)
+(define-constant ERR_INVALID_AMOUNT u202)
+(define-constant ERR_USER_NOT_FOUND u203)
+(define-constant ERR_ACHIEVEMENT_EXISTS u204)
+(define-constant ERR_ACHIEVEMENT_NOT_FOUND u205)
+(define-constant ERR_ALREADY_EARNED u206)
+(define-constant ERR_INSUFFICIENT_REPUTATION u207)
+(define-constant ERR_INVALID_DELEGATION u208)
+(define-constant ERR_SELF_DELEGATION u209)
+(define-constant ERR_PROPOSAL_NOT_FOUND u210)
+(define-constant ERR_VOTING_ENDED u211)
+(define-constant ERR_ALREADY_VOTED u212)
+(define-constant ERR_PROPOSAL_ACTIVE u213)
+(define-constant ERR_SERVICE_NOT_FOUND u214)
+(define-constant ERR_SERVICE_INACTIVE u215)
+(define-constant ERR_INSUFFICIENT_CATEGORY_REP u216)
+(define-constant ERR_ALREADY_IN_PROGRAM u217)
+(define-constant ERR_NOT_IN_PROGRAM u218)
+(define-constant ERR_PROGRAM_EXPIRED u219)
+(define-constant ERR_INVALID_MENTOR u220)
+(define-constant ERR_INVALID_INPUT u221)
+(define-constant ERR_STRING_TOO_LONG u222)
+(define-constant ERR_INVALID_PRINCIPAL u223)
+
+;; Permission bitmasks
+(define-constant PERM_AWARD_POINTS u1)
+(define-constant PERM_MANAGE_ACHIEVEMENTS u2)
+(define-constant PERM_MANAGE_ADMINS u4)
+(define-constant PERM_SYSTEM_CONFIG u8)
+(define-constant PERM_MANAGE_SERVICES u16)
+(define-constant PERM_MANAGE_REHABILITATION u32)
+
+;; Categories
+(define-constant CAT_TECHNICAL "technical")
+(define-constant CAT_COMMUNITY "community")
+(define-constant CAT_GOVERNANCE "governance")
+(define-constant CAT_CREATIVITY "creativity")
+
+;; Service status
+(define-constant STATUS_ACTIVE "active")
+(define-constant STATUS_COMPLETED "completed")
+(define-constant STATUS_EXPIRED "expired")
+
+;; Validation constants
+(define-constant MAX_STRING_LENGTH u500)
+(define-constant MAX_REPUTATION_POINTS u1000000)
+(define-constant MIN_REPUTATION_POINTS u0)
+(define-constant MAX_PERMISSIONS u63)
+(define-constant MAX_REQUIREMENTS u1000000)
+
+;; =============================================================================
+;; INPUT VALIDATION FUNCTIONS
+;; =============================================================================
+
+(define-private (validate-principal (user principal))
+  (not (is-eq user 'SP000000000000000000002Q6VF78))
+)
+
+(define-private (validate-string-length (str (string-ascii 500)))
+  (<= (len str) MAX_STRING_LENGTH)
+)
+
+(define-private (validate-reputation-amount (amount uint))
+  (and 
+    (>= amount MIN_REPUTATION_POINTS)
+    (<= amount MAX_REPUTATION_POINTS)
+  )
+)
+
+(define-private (validate-permissions (permissions uint))
+  (<= permissions MAX_PERMISSIONS)
+)
+
+(define-private (validate-requirements (requirements uint))
+  (<= requirements MAX_REQUIREMENTS)
+)
+
+(define-private (validate-non-zero (value uint))
+  (> value u0)
+)
+
+(define-private (sanitize-uint (value uint))
+  (if (<= value MAX_REPUTATION_POINTS) value u0)
+)
+
+(define-private (validate-category-string (category (string-ascii 20)))
+  (or 
+    (is-eq category CAT_TECHNICAL)
+    (is-eq category CAT_COMMUNITY)
+    (is-eq category CAT_GOVERNANCE)
+    (is-eq category CAT_CREATIVITY)
+  )
+)
+
+;; =============================================================================
+;; DATA STRUCTURES
+;; =============================================================================
+
 ;; Core reputation data with timestamp tracking
 (define-map reputations 
   { user: principal } 
@@ -80,10 +185,6 @@
   { vote: bool, voting-power: uint, voted-at: uint }
 )
 
-;; =============================================================================
-;; MARKETPLACE SYSTEM (Feature 5)
-;; =============================================================================
-
 ;; Marketplace services
 (define-map marketplace-services
   { service-id: uint }
@@ -118,10 +219,6 @@
     last-purchase: uint
   }
 )
-
-;; =============================================================================
-;; REHABILITATION SYSTEM (Feature 7)
-;; =============================================================================
 
 ;; Rehabilitation programs
 (define-map rehabilitation-programs
@@ -197,50 +294,6 @@
 (define-data-var admin-to-remove principal 'SP000000000000000000002Q6VF78)
 
 ;; =============================================================================
-;; CONSTANTS
-;; =============================================================================
-
-(define-constant ERR_NOT_AUTHORIZED u201)
-(define-constant ERR_INVALID_AMOUNT u202)
-(define-constant ERR_USER_NOT_FOUND u203)
-(define-constant ERR_ACHIEVEMENT_EXISTS u204)
-(define-constant ERR_ACHIEVEMENT_NOT_FOUND u205)
-(define-constant ERR_ALREADY_EARNED u206)
-(define-constant ERR_INSUFFICIENT_REPUTATION u207)
-(define-constant ERR_INVALID_DELEGATION u208)
-(define-constant ERR_SELF_DELEGATION u209)
-(define-constant ERR_PROPOSAL_NOT_FOUND u210)
-(define-constant ERR_VOTING_ENDED u211)
-(define-constant ERR_ALREADY_VOTED u212)
-(define-constant ERR_PROPOSAL_ACTIVE u213)
-(define-constant ERR_SERVICE_NOT_FOUND u214)
-(define-constant ERR_SERVICE_INACTIVE u215)
-(define-constant ERR_INSUFFICIENT_CATEGORY_REP u216)
-(define-constant ERR_ALREADY_IN_PROGRAM u217)
-(define-constant ERR_NOT_IN_PROGRAM u218)
-(define-constant ERR_PROGRAM_EXPIRED u219)
-(define-constant ERR_INVALID_MENTOR u220)
-
-;; Permission bitmasks
-(define-constant PERM_AWARD_POINTS u1)
-(define-constant PERM_MANAGE_ACHIEVEMENTS u2)
-(define-constant PERM_MANAGE_ADMINS u4)
-(define-constant PERM_SYSTEM_CONFIG u8)
-(define-constant PERM_MANAGE_SERVICES u16)
-(define-constant PERM_MANAGE_REHABILITATION u32)
-
-;; Categories
-(define-constant CAT_TECHNICAL "technical")
-(define-constant CAT_COMMUNITY "community")
-(define-constant CAT_GOVERNANCE "governance")
-(define-constant CAT_CREATIVITY "creativity")
-
-;; Service status
-(define-constant STATUS_ACTIVE "active")
-(define-constant STATUS_COMPLETED "completed")
-(define-constant STATUS_EXPIRED "expired")
-
-;; =============================================================================
 ;; UTILITY FUNCTIONS
 ;; =============================================================================
 
@@ -257,74 +310,97 @@
 ;; =============================================================================
 
 (define-private (has-permission (admin principal) (permission uint))
-  (match (map-get? admin-roles { admin: admin })
-    admin-data (> (bit-and (get permissions admin-data) permission) u0)
-    false
+  (begin
+    (asserts! (validate-principal admin) false)
+    (asserts! (validate-permissions permission) false)
+    (match (map-get? admin-roles { admin: admin })
+      admin-data (> (bit-and (get permissions admin-data) permission) u0)
+      false
+    )
   )
 )
 
 (define-private (apply-decay (current-score uint) (last-updated uint))
   (let (
-    (blocks-passed (- stacks-block-height last-updated))
+    (sanitized-score (sanitize-uint current-score))
+    (sanitized-updated (if (> last-updated stacks-block-height) stacks-block-height last-updated))
+    (blocks-passed (- stacks-block-height sanitized-updated))
     (decay-periods (/ blocks-passed (var-get decay-period)))
   )
     (if (> decay-periods u0)
       (let (
         (decay-factor (pow u95 decay-periods)) ;; 95% retention per period
-        (decayed-score (/ (* current-score decay-factor) (pow u100 decay-periods)))
+        (decayed-score (/ (* sanitized-score decay-factor) (pow u100 decay-periods)))
       )
         (max-uint decayed-score (var-get min-reputation))
       )
-      current-score
+      sanitized-score
     )
   )
 )
 
 (define-private (record-history (user principal) (action (string-ascii 30)) (points-change int) (category (string-ascii 20)) (reason (string-ascii 100)))
-  (let (
-    (history-id (var-get next-history-id))
-  )
-    (map-set reputation-history
-      { user: user, entry-id: history-id }
-      {
-        action: action,
-        points-change: points-change,
-        category: category,
-        timestamp: stacks-block-height,
-        awarded-by: tx-sender,
-        reason: reason
-      }
+  (begin
+    (asserts! (validate-principal user) false)
+    (asserts! (validate-string-length action) false)
+    (asserts! (validate-category-string category) false)
+    (asserts! (validate-string-length reason) false)
+    (let (
+      (history-id (var-get next-history-id))
     )
-    (var-set next-history-id (+ history-id u1))
+      (map-set reputation-history
+        { user: user, entry-id: history-id }
+        {
+          action: action,
+          points-change: points-change,
+          category: category,
+          timestamp: stacks-block-height,
+          awarded-by: tx-sender,
+          reason: reason
+        }
+      )
+      (var-set next-history-id (+ history-id u1))
+      true
+    )
   )
 )
 
 ;; Returns the user's current (possibly decayed) reputation score
 (define-private (get-current-reputation (user principal))
-  (let (
-    (current-rep (default-to 
-      { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
-      (map-get? reputations { user: user })
-    ))
-  )
-    (apply-decay (get total-score current-rep) (get last-updated current-rep))
+  (begin
+    (asserts! (validate-principal user) u0)
+    (let (
+      (current-rep (default-to 
+        { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
+        (map-get? reputations { user: user })
+      ))
+    )
+      (apply-decay (get total-score current-rep) (get last-updated current-rep))
+    )
   )
 )
 
 ;; Check if user meets category requirements
 (define-private (meets-category-requirements (user principal) (requirements { technical: uint, community: uint, governance: uint, creativity: uint }))
-  (let (
-    (user-rep (default-to 
-      { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
-      (map-get? reputations { user: user })
-    ))
-    (user-categories (get category-scores user-rep))
-  )
-    (and
-      (>= (get technical user-categories) (get technical requirements))
-      (>= (get community user-categories) (get community requirements))
-      (>= (get governance user-categories) (get governance requirements))
-      (>= (get creativity user-categories) (get creativity requirements))
+  (begin
+    (asserts! (validate-principal user) false)
+    (asserts! (validate-reputation-amount (get technical requirements)) false)
+    (asserts! (validate-reputation-amount (get community requirements)) false)
+    (asserts! (validate-reputation-amount (get governance requirements)) false)
+    (asserts! (validate-reputation-amount (get creativity requirements)) false)
+    (let (
+      (user-rep (default-to 
+        { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
+        (map-get? reputations { user: user })
+      ))
+      (user-categories (get category-scores user-rep))
+    )
+      (and
+        (>= (get technical user-categories) (get technical requirements))
+        (>= (get community user-categories) (get community requirements))
+        (>= (get governance user-categories) (get governance requirements))
+        (>= (get creativity user-categories) (get creativity requirements))
+      )
     )
   )
 )
@@ -336,26 +412,43 @@
 
 ;; Apply rehabilitation multiplier without circular dependency
 (define-private (apply-rehabilitation-multiplier (user principal) (points uint))
-  (match (map-get? rehabilitation-programs { user: user })
-    program-data 
-      (if (and (get is-active program-data) (<= stacks-block-height (get end-block program-data)))
-        (/ (* points (+ u100 (get recovery-multiplier program-data))) u100)
-        points
-      )
-    points
+  (begin
+    (asserts! (validate-principal user) points)
+    (asserts! (validate-reputation-amount points) points)
+    (match (map-get? rehabilitation-programs { user: user })
+      program-data 
+        (if (and (get is-active program-data) (<= stacks-block-height (get end-block program-data)))
+          (let (
+            (sanitized-points (sanitize-uint points))
+            (sanitized-multiplier (sanitize-uint (get recovery-multiplier program-data)))
+          )
+            (/ (* sanitized-points (+ u100 sanitized-multiplier)) u100)
+          )
+          points
+        )
+      points
+    )
   )
 )
 
 (define-private (update-category-score (scores { technical: uint, community: uint, governance: uint, creativity: uint }) (category (string-ascii 20)) (points uint))
-  (if (is-eq category CAT_TECHNICAL)
-    (merge scores { technical: (+ (get technical scores) points) })
-    (if (is-eq category CAT_COMMUNITY)
-      (merge scores { community: (+ (get community scores) points) })
-      (if (is-eq category CAT_GOVERNANCE)
-        (merge scores { governance: (+ (get governance scores) points) })
-        (if (is-eq category CAT_CREATIVITY)
-          (merge scores { creativity: (+ (get creativity scores) points) })
-          scores
+  (begin
+    (asserts! (validate-category-string category) scores)
+    (asserts! (validate-reputation-amount points) scores)
+    (let (
+      (sanitized-points (sanitize-uint points))
+    )
+      (if (is-eq category CAT_TECHNICAL)
+        (merge scores { technical: (+ (get technical scores) sanitized-points) })
+        (if (is-eq category CAT_COMMUNITY)
+          (merge scores { community: (+ (get community scores) sanitized-points) })
+          (if (is-eq category CAT_GOVERNANCE)
+            (merge scores { governance: (+ (get governance scores) sanitized-points) })
+            (if (is-eq category CAT_CREATIVITY)
+              (merge scores { creativity: (+ (get creativity scores) sanitized-points) })
+              scores
+            )
+          )
         )
       )
     )
@@ -364,25 +457,32 @@
 
 ;; Direct reputation update function to avoid circular dependencies
 (define-private (direct-reputation-update (user principal) (points uint) (category (string-ascii 20)) (reason (string-ascii 100)))
-  (let (
-    (current-rep (default-to 
-      { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
-      (map-get? reputations { user: user })
-    ))
-    (decayed-score (apply-decay (get total-score current-rep) (get last-updated current-rep)))
-    (new-category-scores (update-category-score (get category-scores current-rep) category points))
-  )
-    (map-set reputations 
-      { user: user }
-      {
-        total-score: (+ decayed-score points),
-        last-updated: stacks-block-height,
-        category-scores: new-category-scores,
-        spent-reputation: (get spent-reputation current-rep)
-      }
+  (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-reputation-amount points) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-category-string category) (err ERR_INVALID_INPUT))
+    (asserts! (validate-string-length reason) (err ERR_STRING_TOO_LONG))
+    (let (
+      (current-rep (default-to 
+        { total-score: u0, last-updated: stacks-block-height, category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 }, spent-reputation: u0 }
+        (map-get? reputations { user: user })
+      ))
+      (decayed-score (apply-decay (get total-score current-rep) (get last-updated current-rep)))
+      (sanitized-points (sanitize-uint points))
+      (new-category-scores (update-category-score (get category-scores current-rep) category sanitized-points))
     )
-    (record-history user "mentor-bonus" (to-int points) category reason)
-    (ok true)
+      (map-set reputations 
+        { user: user }
+        {
+          total-score: (+ decayed-score sanitized-points),
+          last-updated: stacks-block-height,
+          category-scores: new-category-scores,
+          spent-reputation: (get spent-reputation current-rep)
+        }
+      )
+      (record-history user "mentor-bonus" (to-int sanitized-points) category reason)
+      (ok true)
+    )
   )
 )
 
@@ -392,11 +492,11 @@
 
 (define-public (add-admin (new-admin principal) (role (string-ascii 20)) (permissions uint))
   (begin
+    (asserts! (validate-principal new-admin) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-string-length role) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-permissions permissions) (err ERR_INVALID_AMOUNT))
     (asserts! (or (is-eq tx-sender (var-get contract-owner)) 
                   (has-permission tx-sender PERM_MANAGE_ADMINS)) (err ERR_NOT_AUTHORIZED))
-    (asserts! (not (is-eq new-admin 'SP000000000000000000002Q6VF78)) (err ERR_NOT_AUTHORIZED))
-    (asserts! (is-eq (len role) (len role)) (err ERR_NOT_AUTHORIZED)) ;; Ensures role is checked as string-ascii
-    (asserts! (>= permissions u0) (err ERR_INVALID_AMOUNT))
     (map-set admin-roles
       { admin: new-admin }
       {
@@ -414,6 +514,7 @@
 
 (define-public (remove-admin (admin principal))
   (begin
+    (asserts! (validate-principal admin) (err ERR_INVALID_PRINCIPAL))
     (asserts! (or (is-eq tx-sender (var-get contract-owner))
                   (has-permission tx-sender PERM_MANAGE_ADMINS)) (err ERR_NOT_AUTHORIZED))
     (let ((admin-data (map-get? admin-roles { admin: admin })))
@@ -434,8 +535,12 @@
 
 (define-public (award-points (user principal) (points uint) (category (string-ascii 20)) (reason (string-ascii 100)))
   (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-reputation-amount points) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-non-zero points) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-category-string category) (err ERR_INVALID_INPUT))
+    (asserts! (validate-string-length reason) (err ERR_STRING_TOO_LONG))
     (asserts! (has-permission tx-sender PERM_AWARD_POINTS) (err ERR_NOT_AUTHORIZED))
-    (asserts! (> points u0) (err ERR_INVALID_AMOUNT))
     
     (let (
       (current-rep (default-to 
@@ -443,20 +548,22 @@
         (map-get? reputations { user: user })
       ))
       (decayed-score (apply-decay (get total-score current-rep) (get last-updated current-rep)))
-      (new-category-scores (update-category-score (get category-scores current-rep) category points))
+      (sanitized-points (sanitize-uint points))
+      (new-category-scores (update-category-score (get category-scores current-rep) category sanitized-points))
       ;; Apply rehabilitation multiplier if user is in program
-      (final-points (apply-rehabilitation-multiplier user points))
+      (final-points (apply-rehabilitation-multiplier user sanitized-points))
+      (sanitized-final-points (sanitize-uint final-points))
     )
       (map-set reputations 
         { user: user }
         {
-          total-score: (+ decayed-score final-points),
+          total-score: (+ decayed-score sanitized-final-points),
           last-updated: stacks-block-height,
           category-scores: new-category-scores,
           spent-reputation: (get spent-reputation current-rep)
         }
       )
-      (record-history user "award" (to-int final-points) category reason)
+      (record-history user "award" (to-int sanitized-final-points) category reason)
       ;; Update rehabilitation progress if applicable (simplified to avoid circular dependency)
       (unwrap! (update-rehabilitation-progress-simple user) (err u999))
       (ok true)
@@ -466,66 +573,77 @@
 
 ;; Simplified rehabilitation progress update without circular dependency
 (define-private (update-rehabilitation-progress-simple (user principal))
-  (match (map-get? rehabilitation-programs { user: user })
-    program-data
-      (if (and (get is-active program-data) (<= stacks-block-height (get end-block program-data)))
-        (let (
-          (new-completed (+ (get completed-actions program-data) u1))
-        )
-          (map-set rehabilitation-programs
-            { user: user }
-            (merge program-data { completed-actions: new-completed })
+  (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (match (map-get? rehabilitation-programs { user: user })
+      program-data
+        (if (and (get is-active program-data) (<= stacks-block-height (get end-block program-data)))
+          (let (
+            (new-completed (+ (get completed-actions program-data) u1))
           )
-          ;; Check if program is completed
-          (if (>= new-completed (get required-actions program-data))
-            (complete-rehabilitation-program-simple user)
-            (ok true)
+            (map-set rehabilitation-programs
+              { user: user }
+              (merge program-data { completed-actions: new-completed })
+            )
+            ;; Check if program is completed
+            (if (>= new-completed (get required-actions program-data))
+              (complete-rehabilitation-program-simple user)
+              (ok true)
+            )
           )
+          (ok true)
         )
-        (ok true)
-      )
-    (ok true)
+      (ok true)
+    )
   )
 )
 
 ;; Simplified completion without circular dependency
 (define-private (complete-rehabilitation-program-simple (user principal))
-  (match (map-get? rehabilitation-programs { user: user })
-    program-data
-      (begin
-        ;; Mark program as completed
-        (map-set rehabilitation-programs
-          { user: user }
-          (merge program-data { is-active: false })
+  (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (match (map-get? rehabilitation-programs { user: user })
+      program-data
+        (begin
+          ;; Mark program as completed
+          (map-set rehabilitation-programs
+            { user: user }
+            (merge program-data { is-active: false })
+          )
+          
+          ;; Record completion history first
+          (record-history user "rehabilitation-complete" (to-int u0) "system" "program-completed")
+          
+          ;; Award mentor bonus if applicable using direct update
+          (match (get mentor program-data)
+            mentor-principal
+              (let (
+                (mentor-bonus (/ (* (var-get mentor-bonus-rate) u100) u100))
+                (sanitized-bonus (sanitize-uint mentor-bonus))
+              )
+                (direct-reputation-update mentor-principal sanitized-bonus CAT_COMMUNITY "successful-mentoring")
+              )
+            (ok true)
+          )
         )
-        
-        ;; Record completion history first
-        (record-history user "rehabilitation-complete" (to-int u0) "system" "program-completed")
-        
-        ;; Award mentor bonus if applicable using direct update
-        (match (get mentor program-data)
-          mentor-principal
-            (let (
-              (mentor-bonus (/ (* (var-get mentor-bonus-rate) u100) u100))
-            )
-              (direct-reputation-update mentor-principal mentor-bonus CAT_COMMUNITY "successful-mentoring")
-            )
-          (ok true)
-        )
-      )
-    (ok true)
+      (ok true)
+    )
   )
 )
 
 (define-public (deduct-points (user principal) (points uint) (reason (string-ascii 100)))
   (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-reputation-amount points) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-non-zero points) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-string-length reason) (err ERR_STRING_TOO_LONG))
     (asserts! (has-permission tx-sender PERM_AWARD_POINTS) (err ERR_NOT_AUTHORIZED))
-    (asserts! (> points u0) (err ERR_INVALID_AMOUNT))
     
     (let (
       (current-rep (unwrap! (map-get? reputations { user: user }) (err ERR_USER_NOT_FOUND)))
       (decayed-score (apply-decay (get total-score current-rep) (get last-updated current-rep)))
-      (new-score (if (> decayed-score points) (- decayed-score points) u0))
+      (sanitized-points (sanitize-uint points))
+      (new-score (if (> decayed-score sanitized-points) (- decayed-score sanitized-points) u0))
       (penalty-id (var-get next-penalty-id))
     )
       (map-set reputations 
@@ -537,15 +655,15 @@
         { user: user, penalty-id: penalty-id }
         {
           penalty-type: "reputation-deduction",
-          points-deducted: points,
+          points-deducted: sanitized-points,
           issued-at: stacks-block-height,
           issued-by: tx-sender,
           reason: reason,
-          rehabilitation-eligible: (>= points u50) ;; Major penalties are eligible for rehabilitation
+          rehabilitation-eligible: (>= sanitized-points u50) ;; Major penalties are eligible for rehabilitation
         }
       )
       (var-set next-penalty-id (+ penalty-id u1))
-      (record-history user "deduct" (to-int (- u0 points)) "penalty" reason)
+      (record-history user "deduct" (to-int (- u0 sanitized-points)) "penalty" reason)
       (ok true)
     )
   )
@@ -557,19 +675,26 @@
 
 (define-public (create-achievement (name (string-ascii 50)) (description (string-ascii 200)) (points-reward uint) (category (string-ascii 20)) (requirements uint))
   (begin
+    (asserts! (validate-string-length name) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-reputation-amount points-reward) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-category-string category) (err ERR_INVALID_INPUT))
+    (asserts! (validate-requirements requirements) (err ERR_INVALID_AMOUNT))
     (asserts! (has-permission tx-sender PERM_MANAGE_ACHIEVEMENTS) (err ERR_NOT_AUTHORIZED))
     
     (let (
       (achievement-id (var-get next-achievement-id))
+      (sanitized-points (sanitize-uint points-reward))
+      (sanitized-requirements (sanitize-uint requirements))
     )
       (map-set achievements
         { achievement-id: achievement-id }
         {
           name: name,
           description: description,
-          points-reward: points-reward,
+          points-reward: sanitized-points,
           category: category,
-          requirements: requirements,
+          requirements: sanitized-requirements,
           is-active: true
         }
       )
@@ -581,6 +706,8 @@
 
 (define-public (award-achievement (user principal) (achievement-id uint))
   (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-non-zero achievement-id) (err ERR_INVALID_AMOUNT))
     (asserts! (has-permission tx-sender PERM_MANAGE_ACHIEVEMENTS) (err ERR_NOT_AUTHORIZED))
     
     (let (
@@ -601,18 +728,19 @@
           (map-get? reputations { user: user })
         ))
         (decayed-score (apply-decay (get total-score current-rep) (get last-updated current-rep)))
-        (new-category-scores (update-category-score (get category-scores current-rep) (get category achievement) (get points-reward achievement)))
+        (sanitized-points (sanitize-uint (get points-reward achievement)))
+        (new-category-scores (update-category-score (get category-scores current-rep) (get category achievement) sanitized-points))
       )
         (map-set reputations 
           { user: user }
           {
-            total-score: (+ decayed-score (get points-reward achievement)),
+            total-score: (+ decayed-score sanitized-points),
             last-updated: stacks-block-height,
             category-scores: new-category-scores,
             spent-reputation: (get spent-reputation current-rep)
           }
         )
-        (record-history user "achievement" (to-int (get points-reward achievement)) (get category achievement) (get name achievement))
+        (record-history user "achievement" (to-int sanitized-points) (get category achievement) (get name achievement))
         (ok true)
       )
     )
@@ -625,19 +753,33 @@
 
 (define-public (create-service (name (string-ascii 50)) (description (string-ascii 200)) (reputation-cost uint) (category-requirements { technical: uint, community: uint, governance: uint, creativity: uint }))
   (begin
+    (asserts! (validate-string-length name) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-reputation-amount reputation-cost) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-reputation-amount (get technical category-requirements)) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-reputation-amount (get community category-requirements)) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-reputation-amount (get governance category-requirements)) (err ERR_INVALID_AMOUNT))
+    (asserts! (validate-reputation-amount (get creativity category-requirements)) (err ERR_INVALID_AMOUNT))
     (asserts! (has-permission tx-sender PERM_MANAGE_SERVICES) (err ERR_NOT_AUTHORIZED))
     (asserts! (>= reputation-cost (var-get min-service-cost)) (err ERR_INVALID_AMOUNT))
     
     (let (
       (service-id (var-get next-service-id))
+      (sanitized-cost (sanitize-uint reputation-cost))
+      (sanitized-requirements {
+        technical: (sanitize-uint (get technical category-requirements)),
+        community: (sanitize-uint (get community category-requirements)),
+        governance: (sanitize-uint (get governance category-requirements)),
+        creativity: (sanitize-uint (get creativity category-requirements))
+      })
     )
       (map-set marketplace-services
         { service-id: service-id }
         {
           name: name,
           description: description,
-          reputation-cost: reputation-cost,
-          category-requirements: category-requirements,
+          reputation-cost: sanitized-cost,
+          category-requirements: sanitized-requirements,
           provider: tx-sender,
           is-active: true,
           created-at: stacks-block-height,
@@ -652,23 +794,24 @@
 
 (define-public (purchase-service (service-id uint))
   (begin
+    (asserts! (validate-non-zero service-id) (err ERR_INVALID_AMOUNT))
     (let (
       (service (unwrap! (map-get? marketplace-services { service-id: service-id }) (err ERR_SERVICE_NOT_FOUND)))
       (user-rep (unwrap! (map-get? reputations { user: tx-sender }) (err ERR_USER_NOT_FOUND)))
       (current-score (get-current-reputation tx-sender))
-      (service-cost (get reputation-cost service))
+      (sanitized-cost (sanitize-uint (get reputation-cost service)))
       (purchase-id (var-get next-purchase-id))
     )
       (asserts! (get is-active service) (err ERR_SERVICE_INACTIVE))
-      (asserts! (>= current-score service-cost) (err ERR_INSUFFICIENT_REPUTATION))
+      (asserts! (>= current-score sanitized-cost) (err ERR_INSUFFICIENT_REPUTATION))
       (asserts! (meets-category-requirements tx-sender (get category-requirements service)) (err ERR_INSUFFICIENT_CATEGORY_REP))
       
       ;; Deduct reputation cost
       (map-set reputations
         { user: tx-sender }
         (merge user-rep { 
-          total-score: (- current-score service-cost),
-          spent-reputation: (+ (get spent-reputation user-rep) service-cost),
+          total-score: (- current-score sanitized-cost),
+          spent-reputation: (+ (get spent-reputation user-rep) sanitized-cost),
           last-updated: stacks-block-height
         })
       )
@@ -678,7 +821,7 @@
         { user: tx-sender, service-id: service-id, purchase-id: purchase-id }
         {
           purchased-at: stacks-block-height,
-          reputation-spent: service-cost,
+          reputation-spent: sanitized-cost,
           status: STATUS_ACTIVE
         }
       )
@@ -700,14 +843,14 @@
           { user: tx-sender }
           {
             active-services: (unwrap-panic (as-max-len? (append (get active-services current-access) service-id) u10)),
-            total-spent: (+ (get total-spent current-access) service-cost),
+            total-spent: (+ (get total-spent current-access) sanitized-cost),
             last-purchase: stacks-block-height
           }
         )
       )
       
       (var-set next-purchase-id (+ purchase-id u1))
-      (record-history tx-sender "service-purchase" (to-int (- u0 service-cost)) "marketplace" (get name service))
+      (record-history tx-sender "service-purchase" (to-int (- u0 sanitized-cost)) "marketplace" (get name service))
       (ok purchase-id)
     )
   )
@@ -715,6 +858,7 @@
 
 (define-public (deactivate-service (service-id uint))
   (begin
+    (asserts! (validate-non-zero service-id) (err ERR_INVALID_AMOUNT))
     (let (
       (service (unwrap! (map-get? marketplace-services { service-id: service-id }) (err ERR_SERVICE_NOT_FOUND)))
     )
@@ -736,6 +880,9 @@
 
 (define-public (start-rehabilitation-program (user principal) (program-type (string-ascii 30)) (penalty-reason (string-ascii 100)))
   (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-string-length program-type) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-string-length penalty-reason) (err ERR_STRING_TOO_LONG))
     (asserts! (has-permission tx-sender PERM_MANAGE_REHABILITATION) (err ERR_NOT_AUTHORIZED))
     (asserts! (is-none (map-get? rehabilitation-programs { user: user })) (err ERR_ALREADY_IN_PROGRAM))
     
@@ -766,6 +913,8 @@
 
 (define-public (assign-mentor (mentee principal) (mentor principal))
   (begin
+    (asserts! (validate-principal mentee) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-principal mentor) (err ERR_INVALID_PRINCIPAL))
     (asserts! (has-permission tx-sender PERM_MANAGE_REHABILITATION) (err ERR_NOT_AUTHORIZED))
     (asserts! (not (is-eq mentee mentor)) (err ERR_INVALID_MENTOR))
     
@@ -797,6 +946,8 @@
 
 (define-public (complete-rehabilitation-action (user principal) (action-description (string-ascii 100)))
   (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-string-length action-description) (err ERR_STRING_TOO_LONG))
     (asserts! (has-permission tx-sender PERM_MANAGE_REHABILITATION) (err ERR_NOT_AUTHORIZED))
     
     (let (
@@ -826,45 +977,182 @@
 )
 
 ;; =============================================================================
+;; GOVERNANCE SYSTEM
+;; =============================================================================
+
+(define-public (create-proposal (title (string-ascii 100)) (description (string-ascii 500)) (proposal-type (string-ascii 20)))
+  (begin
+    (asserts! (validate-string-length title) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
+    (asserts! (validate-string-length proposal-type) (err ERR_STRING_TOO_LONG))
+    (let (
+      (user-rep (get-current-reputation tx-sender))
+      (proposal-id (var-get next-proposal-id))
+    )
+      (asserts! (>= user-rep (var-get proposal-threshold)) (err ERR_INSUFFICIENT_REPUTATION))
+      
+      (map-set proposals
+        { proposal-id: proposal-id }
+        {
+          title: title,
+          description: description,
+          proposer: tx-sender,
+          created-at: stacks-block-height,
+          voting-ends-at: (+ stacks-block-height (var-get voting-period)),
+          votes-for: u0,
+          votes-against: u0,
+          executed: false,
+          proposal-type: proposal-type
+        }
+      )
+      (var-set next-proposal-id (+ proposal-id u1))
+      (ok proposal-id)
+    )
+  )
+)
+
+(define-public (vote-on-proposal (proposal-id uint) (vote-for bool))
+  (begin
+    (asserts! (validate-non-zero proposal-id) (err ERR_INVALID_AMOUNT))
+    (let (
+      (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND)))
+      (user-rep (get-current-reputation tx-sender))
+      (existing-vote (map-get? proposal-votes { proposal-id: proposal-id, voter: tx-sender }))
+      (sanitized-rep (sanitize-uint user-rep))
+    )
+      (asserts! (is-none existing-vote) (err ERR_ALREADY_VOTED))
+      (asserts! (<= stacks-block-height (get voting-ends-at proposal)) (err ERR_VOTING_ENDED))
+      (asserts! (> sanitized-rep u0) (err ERR_INSUFFICIENT_REPUTATION))
+      
+      ;; Record the vote
+      (map-set proposal-votes
+        { proposal-id: proposal-id, voter: tx-sender }
+        { vote: vote-for, voting-power: sanitized-rep, voted-at: stacks-block-height }
+      )
+      
+      ;; Update proposal vote counts
+      (if vote-for
+        (map-set proposals
+          { proposal-id: proposal-id }
+          (merge proposal { votes-for: (+ (get votes-for proposal) sanitized-rep) })
+        )
+        (map-set proposals
+          { proposal-id: proposal-id }
+          (merge proposal { votes-against: (+ (get votes-against proposal) sanitized-rep) })
+        )
+      )
+      (ok true)
+    )
+  )
+)
+
+(define-public (delegate-voting-power (delegate principal))
+  (begin
+    (asserts! (validate-principal delegate) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (not (is-eq tx-sender delegate)) (err ERR_SELF_DELEGATION))
+    (let (
+      (user-rep (get-current-reputation tx-sender))
+      (sanitized-rep (sanitize-uint user-rep))
+    )
+      (asserts! (> sanitized-rep u0) (err ERR_INSUFFICIENT_REPUTATION))
+      
+      (map-set delegations
+        { delegator: tx-sender }
+        { delegate: delegate, delegated-at: stacks-block-height, voting-power: sanitized-rep }
+      )
+      (ok true)
+    )
+  )
+)
+
+;; =============================================================================
 ;; READ-ONLY FUNCTIONS
 ;; =============================================================================
 
 (define-read-only (get-user-reputation (user principal))
-  (let (
-    (rep-data (map-get? reputations { user: user }))
-  )
-    (match rep-data
-      data (some {
-        total-score: (get-current-reputation user),
-        category-scores: (get category-scores data),
-        spent-reputation: (get spent-reputation data),
-        last-updated: (get last-updated data)
-      })
-      none
+  (begin
+    (asserts! (validate-principal user) none)
+    (let (
+      (rep-data (map-get? reputations { user: user }))
+    )
+      (match rep-data
+        data (some {
+          total-score: (get-current-reputation user),
+          category-scores: (get category-scores data),
+          spent-reputation: (get spent-reputation data),
+          last-updated: (get last-updated data)
+        })
+        none
+      )
     )
   )
 )
 
 (define-read-only (get-service-details (service-id uint))
-  (map-get? marketplace-services { service-id: service-id })
+  (begin
+    (asserts! (validate-non-zero service-id) none)
+    (map-get? marketplace-services { service-id: service-id })
+  )
 )
 
 (define-read-only (get-user-rehabilitation-status (user principal))
-  (map-get? rehabilitation-programs { user: user })
+  (begin
+    (asserts! (validate-principal user) none)
+    (map-get? rehabilitation-programs { user: user })
+  )
 )
 
 (define-read-only (get-user-service-access (user principal))
-  (map-get? user-service-access { user: user })
+  (begin
+    (asserts! (validate-principal user) none)
+    (map-get? user-service-access { user: user })
+  )
 )
 
 (define-read-only (has-user-purchased-service (user principal) (service-id uint))
-  (let (
-    (user-access (map-get? user-service-access { user: user }))
-  )
-    (match user-access
-      access-data 
-        (is-some (index-of? (get active-services access-data) service-id))
-      false
+  (begin
+    (asserts! (validate-principal user) false)
+    (asserts! (validate-non-zero service-id) false)
+    (let (
+      (user-access (map-get? user-service-access { user: user }))
+    )
+      (match user-access
+        access-data 
+          (is-some (index-of? (get active-services access-data) service-id))
+        false
+      )
     )
   )
+)
+
+(define-read-only (get-achievement-details (achievement-id uint))
+  (begin
+    (asserts! (validate-non-zero achievement-id) none)
+    (map-get? achievements { achievement-id: achievement-id })
+  )
+)
+
+(define-read-only (get-proposal-details (proposal-id uint))
+  (begin
+    (asserts! (validate-non-zero proposal-id) none)
+    (map-get? proposals { proposal-id: proposal-id })
+  )
+)
+
+(define-read-only (get-admin-details (admin principal))
+  (begin
+    (asserts! (validate-principal admin) none)
+    (map-get? admin-roles { admin: admin })
+  )
+)
+
+;; Initialize contract with owner as first admin
+(map-set admin-roles
+  { admin: (var-get contract-owner) }
+  {
+    role: "owner",
+    permissions: u63, ;; All permissions
+    appointed-at: stacks-block-height,
+    appointed-by: (var-get contract-owner)
+  }
 )
