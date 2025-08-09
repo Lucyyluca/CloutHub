@@ -2,75 +2,104 @@
 
 CloutHub is a Clarity smart contract for the Stacks blockchain that implements a **reputation-based governance, achievement, marketplace, and rehabilitation system** for decentralized communities and platforms.
 
----
+## Recent Updates
 
-## Features
+Added new features:
+- **Governance System:**
+  - Proposal creation and voting mechanism
+  - Delegation of voting power
+  - Configurable voting periods and thresholds
+- **Enhanced Rehabilitation System:**
+  - Mentor assignment and tracking
+  - Progress monitoring
+  - Completion rewards
+  - Rehabilitation multipliers for earned points
+- **Extended Marketplace Features:**
+  - Category-based requirements
+  - Service usage tracking
+  - Purchase history
+  - Active service listing
+
+## Core Features
 
 - **Reputation System:**  
-  - Tracks users' reputation scores, including category breakdowns (technical, community, governance, creativity).
-  - Supports reputation decay over time, reputation spending, and history tracking.
+  - Category-based scoring (technical, community, governance, creativity)
+  - Time-based decay
+  - Spending tracking
+  - Action history
 
-- **Admin Roles & Permissions:**  
-  - Flexible admin management with role-based permissions using bitmasks.
-  - Only authorized admins can manage reputation, achievements, services, and rehabilitation programs.
+- **Admin Management:**  
+  - Role-based permissions
+  - Granular access control
+  - Admin appointment tracking
 
-- **Achievements:**  
-  - Admins can define and award achievements to users, granting reputation points.
+- **Achievement System:**  
+  - Custom achievements
+  - Point rewards
+  - Category-specific awards
 
 - **Marketplace:**  
-  - Services can be created and purchased using reputation.
-  - Tracks service usage and user access.
+  - Reputation-based services
+  - Category requirements
+  - Usage analytics
 
-- **Governance:**  
-  - Proposal and voting system (data structures included).
+## New Functions
 
-- **Rehabilitation:**  
-  - Penalized users can enter rehabilitation programs, complete actions, and be mentored for reputation recovery.
+### Governance
+```clarity
+create-proposal(title, description, proposal-type)
+vote-on-proposal(proposal-id, vote-for)
+delegate-voting-power(delegate)
+```
 
----
+### Rehabilitation
+```clarity
+start-rehabilitation-program(user, program-type, penalty-reason)
+assign-mentor(mentee, mentor)
+complete-rehabilitation-action(user, action-description)
+```
 
-## Key Data Structures
+### New Query Functions
+```clarity
+get-user-rehabilitation-status(user)
+get-achievement-details(achievement-id)
+get-proposal-details(proposal-id)
+get-admin-details(admin)
+```
 
-- `reputations`: Tracks user reputation, category scores, spent reputation, and last update.
-- `admin-roles`: Stores admin roles, permissions, and appointment info.
-- `achievements` & `user-achievements`: Achievement definitions and user awards.
-- `marketplace-services`, `service-purchases`, `user-service-access`: Marketplace and service usage tracking.
-- `rehabilitation-programs`, `user-penalties`, `mentorship-relationships`: Rehabilitation and penalty management.
+## Enhanced Data Structures
 
----
+- **Proposals:**
+  ```clarity
+  proposals: { title, description, votes-for, votes-against, ... }
+  proposal-votes: { vote, voting-power, voted-at }
+  ```
 
-## Main Public Functions
+- **Rehabilitation:**
+  ```clarity
+  rehabilitation-programs: { program-type, actions, mentor, multiplier, ... }
+  mentorship-relationships: { mentor, mentee, progress, status }
+  ```
 
-- **Admin Management**
-  - `add-admin(new-admin, role, permissions)`
-  - `remove-admin(admin)`
+## Configuration Settings
 
-- **Reputation Management**
-  - `award-points(user, points, category, reason)`
-  - `deduct-points(user, points, reason)`
+Added new system variables:
+- `proposal-threshold`: Minimum reputation for creating proposals
+- `voting-period`: Duration of voting windows
+- `rehabilitation-period`: Length of rehabilitation programs
+- `mentor-bonus-rate`: Reward rate for successful mentoring
+- `marketplace-fee-rate`: Service fees
+- `min-service-cost`: Minimum service pricing
 
-- **Achievements**
-  - `create-achievement(name, description, points-reward, category, requirements)`
-  - `award-achievement(user, achievement-id)`
+## Error Handling
 
-- **Marketplace**
-  - `create-service(name, description, reputation-cost, category-requirements)`
-  - `purchase-service(service-id)`
-  - `deactivate-service(service-id)`
-
-- **Rehabilitation**
-  - `start-rehabilitation-program(user, program-type, penalty-reason)`
-  - `assign-mentor(mentee, mentor)`
-  - `complete-rehabilitation-action(user, action-description)`
-
-- **Read-Only Queries**
-  - `get-user-reputation(user)`
-  - `get-service-details(service-id)`
-  - `get-user-rehabilitation-status(user)`
-  - `get-user-service-access(user)`
-  - `has-user-purchased-service(user, service-id)`
-
----
+New error constants:
+- `ERR_PROPOSAL_ACTIVE`
+- `ERR_SERVICE_INACTIVE`
+- `ERR_INSUFFICIENT_CATEGORY_REP`
+- `ERR_ALREADY_IN_PROGRAM`
+- `ERR_PROGRAM_EXPIRED`
+- `ERR_INVALID_MENTOR`
 
 ## Usage
 
