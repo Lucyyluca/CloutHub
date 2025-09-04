@@ -28,6 +28,12 @@
 (define-constant ERR_INVALID_INPUT u221)
 (define-constant ERR_STRING_TOO_LONG u222)
 (define-constant ERR_INVALID_PRINCIPAL u223)
+(define-constant ERR_SYSTEM_PAUSED u224)
+(define-constant ERR_EMERGENCY_MODE u225)
+(define-constant ERR_OWNER_ONLY u226)
+(define-constant ERR_CRITICAL_OPERATION u227)
+(define-constant ERR_EMERGENCY_TIMEOUT u228)
+(define-constant ERR_MAX_EMERGENCY_ACTIONS u229)
 
 ;; Permission bitmasks
 (define-constant PERM_AWARD_POINTS u1)
@@ -54,6 +60,10 @@
 (define-constant MIN_REPUTATION_POINTS u0)
 (define-constant MAX_PERMISSIONS u63)
 (define-constant MAX_REQUIREMENTS u1000000)
+
+;; Emergency constants
+(define-constant EMERGENCY_TIMEOUT u1008) ;; ~1 week in blocks
+(define-constant MAX_EMERGENCY_ACTIONS u10)
 
 ;; =============================================================================
 ;; INPUT VALIDATION FUNCTIONS
@@ -96,6 +106,70 @@
     (is-eq category CAT_COMMUNITY)
     (is-eq category CAT_GOVERNANCE)
     (is-eq category CAT_CREATIVITY)
+  )
+)
+
+;; Helper function to truncate strings for record-history
+(define-private (truncate-reason (reason (string-ascii 200)))
+  (if (<= (len reason) u100)
+    (unwrap-panic (as-max-len? reason u100))
+    (unwrap-panic (as-max-len? (unwrap-panic (slice? reason u0 u100)) u100))
+  )
+)
+
+;; =============================================================================
+;; EMERGENCY SAFETY CONTROLS
+;; =============================================================================
+
+(define-private (assert-not-paused)
+  (begin
+    (asserts! (is-eq (var-get paused) false) (err ERR_SYSTEM_PAUSED))
+    (ok true)
+  )
+)
+
+(define-private (assert-not-emergency)
+  (begin
+    (asserts! (is-eq (var-get emergency-mode) false) (err ERR_EMERGENCY_MODE))
+    (ok true)
+  )
+)
+
+(define-private (assert-owner-only)
+  (begin
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR_OWNER_ONLY))
+    (ok true)
+  )
+)
+
+(define-private (assert-critical-operation-allowed)
+  (begin
+    (try! (assert-not-paused))
+    (try! (assert-not-emergency))
+    (ok true)
+  )
+)
+
+(define-private (is-emergency-admin (admin principal))
+  (or 
+    (is-eq admin (var-get contract-owner))
+    (is-eq admin (var-get emergency-admin))
+  )
+)
+
+(define-private (check-emergency-timeout)
+  (let (
+    (activated-at (var-get emergency-activated-at))
+  )
+    (if (and (> activated-at u0) 
+             (> (- stacks-block-height activated-at) EMERGENCY_TIMEOUT))
+      (begin
+        (var-set emergency-mode false)
+        (var-set emergency-activated-at u0)
+        true
+      )
+      true
+    )
   )
 )
 
@@ -260,11 +334,24 @@
   }
 )
 
+;; Emergency action tracking
+(define-map emergency-actions
+  { action-id: uint }
+  {
+    action-type: (string-ascii 30),
+    executed-by: principal,
+    executed-at: uint,
+    reason: (string-ascii 200),
+    affected-users: (list 10 principal)
+  }
+)
+
 ;; =============================================================================
 ;; DATA VARIABLES
 ;; =============================================================================
 
 (define-data-var contract-owner principal tx-sender)
+(define-data-var emergency-admin principal tx-sender)
 (define-data-var admins (list 20 principal) (list tx-sender))
 (define-data-var next-achievement-id uint u1)
 (define-data-var next-history-id uint u1)
@@ -272,6 +359,13 @@
 (define-data-var next-service-id uint u1)
 (define-data-var next-penalty-id uint u1)
 (define-data-var next-purchase-id uint u1)
+(define-data-var next-emergency-action-id uint u1)
+
+;; Emergency controls
+(define-data-var paused bool false)
+(define-data-var emergency-mode bool false)
+(define-data-var emergency-activated-at uint u0)
+(define-data-var emergency-actions-count uint u0)
 
 ;; Reputation decay settings
 (define-data-var decay-rate uint u5) ;; 5% per period
@@ -303,6 +397,108 @@
 
 (define-private (min-uint (a uint) (b uint))
   (if (< a b) a b)
+)
+
+;; =============================================================================
+;; EMERGENCY MANAGEMENT FUNCTIONS
+;; =============================================================================
+
+(define-public (pause-contract)
+  (begin
+    (asserts! (or (is-eq tx-sender (var-get contract-owner))
+                  (has-permission tx-sender PERM_SYSTEM_CONFIG)) (err ERR_NOT_AUTHORIZED))
+    (var-set paused true)
+    (unwrap-panic (record-emergency-action "contract-paused" "System paused for maintenance or security" (list)))
+    (ok true)
+  )
+)
+
+(define-public (unpause-contract)
+  (begin
+    (asserts! (or (is-eq tx-sender (var-get contract-owner))
+                  (has-permission tx-sender PERM_SYSTEM_CONFIG)) (err ERR_NOT_AUTHORIZED))
+    (var-set paused false)
+    (unwrap-panic (record-emergency-action "contract-unpaused" "System resumed normal operations" (list)))
+    (ok true)
+  )
+)
+
+(define-public (activate-emergency-mode (reason (string-ascii 200)))
+  (begin
+    (asserts! (validate-string-length reason) (err ERR_STRING_TOO_LONG))
+    (asserts! (is-emergency-admin tx-sender) (err ERR_NOT_AUTHORIZED))
+    (var-set emergency-mode true)
+    (var-set emergency-activated-at stacks-block-height)
+    (var-set emergency-actions-count u0)
+    (unwrap-panic (record-emergency-action "emergency-activated" reason (list)))
+    (ok true)
+  )
+)
+
+(define-public (deactivate-emergency-mode)
+  (begin
+    (asserts! (is-emergency-admin tx-sender) (err ERR_NOT_AUTHORIZED))
+    (var-set emergency-mode false)
+    (var-set emergency-activated-at u0)
+    (unwrap-panic (record-emergency-action "emergency-deactivated" "Emergency mode deactivated" (list)))
+    (ok true)
+  )
+)
+
+(define-public (set-emergency-admin (new-emergency-admin principal))
+  (begin
+    (try! (assert-owner-only))
+    (asserts! (validate-principal new-emergency-admin) (err ERR_INVALID_PRINCIPAL))
+    (var-set emergency-admin new-emergency-admin)
+    (unwrap-panic (record-emergency-action "emergency-admin-changed" "Emergency admin updated" (list new-emergency-admin)))
+    (ok true)
+  )
+)
+
+(define-public (emergency-reputation-reset (user principal) (reason (string-ascii 200)))
+  (begin
+    (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (validate-string-length reason) (err ERR_STRING_TOO_LONG))
+    (asserts! (is-emergency-admin tx-sender) (err ERR_NOT_AUTHORIZED))
+    (asserts! (var-get emergency-mode) (err ERR_EMERGENCY_MODE))
+    (asserts! (< (var-get emergency-actions-count) MAX_EMERGENCY_ACTIONS) (err ERR_MAX_EMERGENCY_ACTIONS))
+    
+    ;; Reset user reputation to minimum
+    (map-set reputations
+      { user: user }
+      {
+        total-score: (var-get min-reputation),
+        last-updated: stacks-block-height,
+        category-scores: { technical: u0, community: u0, governance: u0, creativity: u0 },
+        spent-reputation: u0
+      }
+    )
+    
+    (var-set emergency-actions-count (+ (var-get emergency-actions-count) u1))
+    (unwrap-panic (record-emergency-action "reputation-reset" reason (list user)))
+    ;; Truncate reason to fit record-history parameter type
+    (record-history user "emergency-reset" (to-int (- u0 (var-get min-reputation))) "system" (truncate-reason reason))
+    (ok true)
+  )
+)
+
+(define-private (record-emergency-action (action-type (string-ascii 30)) (reason (string-ascii 200)) (affected-users (list 10 principal)))
+  (let (
+    (action-id (var-get next-emergency-action-id))
+  )
+    (map-set emergency-actions
+      { action-id: action-id }
+      {
+        action-type: action-type,
+        executed-by: tx-sender,
+        executed-at: stacks-block-height,
+        reason: reason,
+        affected-users: affected-users
+      }
+    )
+    (var-set next-emergency-action-id (+ action-id u1))
+    (ok true)
+  )
 )
 
 ;; =============================================================================
@@ -492,6 +688,7 @@
 
 (define-public (add-admin (new-admin principal) (role (string-ascii 20)) (permissions uint))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal new-admin) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-string-length role) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-permissions permissions) (err ERR_INVALID_AMOUNT))
@@ -514,18 +711,50 @@
 
 (define-public (remove-admin (admin principal))
   (begin
+    (try! (assert-critical-operation-allowed))
     (asserts! (validate-principal admin) (err ERR_INVALID_PRINCIPAL))
-    (asserts! (or (is-eq tx-sender (var-get contract-owner))
-                  (has-permission tx-sender PERM_MANAGE_ADMINS)) (err ERR_NOT_AUTHORIZED))
+    ;; Only contract owner can remove admins (critical operation)
+    (try! (assert-owner-only))
+    ;; Prevent removing the contract owner
+    (asserts! (not (is-eq admin (var-get contract-owner))) (err ERR_CRITICAL_OPERATION))
+    
     (let ((admin-data (map-get? admin-roles { admin: admin })))
       (let ((unwrapped-admin (unwrap! admin-data (err ERR_USER_NOT_FOUND))))
         (map-delete admin-roles { admin: admin })
         ;; Set the admin to remove and filter the list
         (var-set admin-to-remove admin)
         (var-set admins (filter is-not-target-admin (var-get admins)))
+        (unwrap-panic (record-emergency-action "admin-removed" "Admin privileges revoked" (list admin)))
         (ok true)
       )
     )
+  )
+)
+
+(define-public (transfer-ownership (new-owner principal))
+  (begin
+    (try! (assert-owner-only))
+    (asserts! (validate-principal new-owner) (err ERR_INVALID_PRINCIPAL))
+    (asserts! (not (is-eq new-owner (var-get contract-owner))) (err ERR_INVALID_INPUT))
+    
+    ;; Update admin roles for new owner
+    (map-set admin-roles
+      { admin: new-owner }
+      {
+        role: "owner",
+        permissions: u63,
+        appointed-at: stacks-block-height,
+        appointed-by: tx-sender
+      }
+    )
+    
+    ;; Remove old owner from admin roles but keep in admins list for history
+    (map-delete admin-roles { admin: (var-get contract-owner) })
+    
+    ;; Transfer ownership
+    (var-set contract-owner new-owner)
+    (unwrap-panic (record-emergency-action "ownership-transferred" "Contract ownership transferred" (list new-owner)))
+    (ok true)
   )
 )
 
@@ -535,6 +764,7 @@
 
 (define-public (award-points (user principal) (points uint) (category (string-ascii 20)) (reason (string-ascii 100)))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-reputation-amount points) (err ERR_INVALID_AMOUNT))
     (asserts! (validate-non-zero points) (err ERR_INVALID_AMOUNT))
@@ -565,7 +795,7 @@
       )
       (record-history user "award" (to-int sanitized-final-points) category reason)
       ;; Update rehabilitation progress if applicable (simplified to avoid circular dependency)
-      (unwrap! (update-rehabilitation-progress-simple user) (err u999))
+      (try! (update-rehabilitation-progress-simple user))
       (ok true)
     )
   )
@@ -621,7 +851,8 @@
                 (mentor-bonus (/ (* (var-get mentor-bonus-rate) u100) u100))
                 (sanitized-bonus (sanitize-uint mentor-bonus))
               )
-                (direct-reputation-update mentor-principal sanitized-bonus CAT_COMMUNITY "successful-mentoring")
+                (try! (direct-reputation-update mentor-principal sanitized-bonus CAT_COMMUNITY "successful-mentoring"))
+                (ok true)
               )
             (ok true)
           )
@@ -633,6 +864,7 @@
 
 (define-public (deduct-points (user principal) (points uint) (reason (string-ascii 100)))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-reputation-amount points) (err ERR_INVALID_AMOUNT))
     (asserts! (validate-non-zero points) (err ERR_INVALID_AMOUNT))
@@ -675,6 +907,7 @@
 
 (define-public (create-achievement (name (string-ascii 50)) (description (string-ascii 200)) (points-reward uint) (category (string-ascii 20)) (requirements uint))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-string-length name) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-reputation-amount points-reward) (err ERR_INVALID_AMOUNT))
@@ -706,6 +939,7 @@
 
 (define-public (award-achievement (user principal) (achievement-id uint))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-non-zero achievement-id) (err ERR_INVALID_AMOUNT))
     (asserts! (has-permission tx-sender PERM_MANAGE_ACHIEVEMENTS) (err ERR_NOT_AUTHORIZED))
@@ -753,6 +987,7 @@
 
 (define-public (create-service (name (string-ascii 50)) (description (string-ascii 200)) (reputation-cost uint) (category-requirements { technical: uint, community: uint, governance: uint, creativity: uint }))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-string-length name) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-reputation-amount reputation-cost) (err ERR_INVALID_AMOUNT))
@@ -794,6 +1029,7 @@
 
 (define-public (purchase-service (service-id uint))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-non-zero service-id) (err ERR_INVALID_AMOUNT))
     (let (
       (service (unwrap! (map-get? marketplace-services { service-id: service-id }) (err ERR_SERVICE_NOT_FOUND)))
@@ -858,6 +1094,7 @@
 
 (define-public (deactivate-service (service-id uint))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-non-zero service-id) (err ERR_INVALID_AMOUNT))
     (let (
       (service (unwrap! (map-get? marketplace-services { service-id: service-id }) (err ERR_SERVICE_NOT_FOUND)))
@@ -880,6 +1117,7 @@
 
 (define-public (start-rehabilitation-program (user principal) (program-type (string-ascii 30)) (penalty-reason (string-ascii 100)))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-string-length program-type) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-string-length penalty-reason) (err ERR_STRING_TOO_LONG))
@@ -913,6 +1151,7 @@
 
 (define-public (assign-mentor (mentee principal) (mentor principal))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal mentee) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-principal mentor) (err ERR_INVALID_PRINCIPAL))
     (asserts! (has-permission tx-sender PERM_MANAGE_REHABILITATION) (err ERR_NOT_AUTHORIZED))
@@ -946,6 +1185,7 @@
 
 (define-public (complete-rehabilitation-action (user principal) (action-description (string-ascii 100)))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal user) (err ERR_INVALID_PRINCIPAL))
     (asserts! (validate-string-length action-description) (err ERR_STRING_TOO_LONG))
     (asserts! (has-permission tx-sender PERM_MANAGE_REHABILITATION) (err ERR_NOT_AUTHORIZED))
@@ -982,6 +1222,7 @@
 
 (define-public (create-proposal (title (string-ascii 100)) (description (string-ascii 500)) (proposal-type (string-ascii 20)))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-string-length title) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-string-length description) (err ERR_STRING_TOO_LONG))
     (asserts! (validate-string-length proposal-type) (err ERR_STRING_TOO_LONG))
@@ -1013,6 +1254,7 @@
 
 (define-public (vote-on-proposal (proposal-id uint) (vote-for bool))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-non-zero proposal-id) (err ERR_INVALID_AMOUNT))
     (let (
       (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) (err ERR_PROPOSAL_NOT_FOUND)))
@@ -1048,6 +1290,7 @@
 
 (define-public (delegate-voting-power (delegate principal))
   (begin
+    (try! (assert-not-paused))
     (asserts! (validate-principal delegate) (err ERR_INVALID_PRINCIPAL))
     (asserts! (not (is-eq tx-sender delegate)) (err ERR_SELF_DELEGATION))
     (let (
@@ -1143,6 +1386,24 @@
   (begin
     (asserts! (validate-principal admin) none)
     (map-get? admin-roles { admin: admin })
+  )
+)
+
+(define-read-only (get-contract-status)
+  {
+    paused: (var-get paused),
+    emergency-mode: (var-get emergency-mode),
+    emergency-activated-at: (var-get emergency-activated-at),
+    emergency-actions-count: (var-get emergency-actions-count),
+    contract-owner: (var-get contract-owner),
+    emergency-admin: (var-get emergency-admin)
+  }
+)
+
+(define-read-only (get-emergency-action (action-id uint))
+  (begin
+    (asserts! (validate-non-zero action-id) none)
+    (map-get? emergency-actions { action-id: action-id })
   )
 )
 
